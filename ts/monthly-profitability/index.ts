@@ -4,22 +4,35 @@ import axios from "axios";
 // Get required env variables
 const voteAccountAddress = process.env.VOTE_ACCOUNT;
 const identityAddress = process.env.IDENTITY;
-const startDateStr = process.env.START_DATE;
 const monthlyExpenses = process.env.MONTHLY_EXPENSES;
 
 // Validate required env variables
-if (
-  !voteAccountAddress ||
-  !identityAddress ||
-  !startDateStr ||
-  !monthlyExpenses
-) {
+if (!voteAccountAddress || !identityAddress || !monthlyExpenses) {
   console.error("Missing required environment variables:");
   console.error("VOTE_ACCOUNT - Vote account address");
   console.error("IDENTITY - Identity account address");
   console.error("START_DATE - Billing start date (YYYY-MM-DD)");
   console.error("MONTHLY_EXPENSES - Monthly expenses in USD");
   process.exit(1);
+}
+
+const monthlyBillingDay = parseInt(process.env.MONTHLY_BILLING_DAY || "1");
+if (monthlyBillingDay < 1 || monthlyBillingDay > 31) {
+  console.error("Invalid MONTHLY_BILLING_DAY provided.");
+  process.exit(1);
+}
+
+// Get the most recent billing date
+function getMostRecentBillingDate(targetDay: number): Date {
+  const today = new Date();
+  const currentDay = today.getDate();
+  const month =
+    currentDay >= targetDay ? today.getMonth() : today.getMonth() - 1;
+  const year = month < 0 ? today.getFullYear() - 1 : today.getFullYear();
+  const adjustedMonth = (month + 12) % 12;
+
+  const billingDate = new Date(year, adjustedMonth, targetDay);
+  return billingDate;
 }
 
 async function main() {
@@ -30,10 +43,9 @@ async function main() {
 
   const voteAccount = new PublicKey(voteAccountAddress);
 
-  const startDate = new Date(startDateStr);
-  const currentDate = new Date();
-  const startTimestamp = Math.floor(startDate.getTime() / 1000);
-
+  const now = new Date();
+  const startDate = getMostRecentBillingDate(monthlyBillingDay);
+  const startDateStr = startDate.toISOString().split("T")[0];
   const currentEpochInfo = await connection.getEpochInfo();
   const currentEpoch = currentEpochInfo.epoch;
 
@@ -122,7 +134,6 @@ async function main() {
 
   const revenueUSD = totalGainSOL * solanaPrice;
   const expensesUSD = parseFloat(monthlyExpenses);
-  const profitUSD = revenueUSD - expensesUSD;
 
   // Print results
   console.log("\nValidator Profit Report");
@@ -130,8 +141,11 @@ async function main() {
   console.log(
     `Period: ${startDateStr} to ${new Date().toISOString().split("T")[0]}`
   );
-  console.log(`Total SOL gained: ${totalGainSOL.toFixed(2)} SOL`);
-  console.log(`Revenue: $${revenueUSD.toFixed(2)}`);
+  console.log(
+    `Total SOL gained: ${totalGainSOL.toFixed(2)} SOL ($${(
+      totalGainSOL * solanaPrice
+    ).toFixed(2)})`
+  );
   console.log(
     `Vote account rewards: ${totalVoteRewards.toFixed(2)} SOL ($${(
       totalVoteRewards * solanaPrice
@@ -142,9 +156,41 @@ async function main() {
       totalJitoRewards * solanaPrice
     ).toFixed(2)})`
   );
-  console.log(`Expenses: $${expensesUSD.toFixed(2)}`);
-  console.log(`Profit: $${profitUSD.toFixed(2)}`);
+
+  const nextBillingDate = new Date(startDate);
+  nextBillingDate.setMonth(startDate.getMonth() + 1);
+
+  const totalCycleMs = nextBillingDate.getTime() - startDate.getTime();
+  const elapsedMs = now.getTime() - startDate.getTime();
+  const elapsedPercentage = (elapsedMs / totalCycleMs) * 100;
+
+  const projectedRevenueUSD = (revenueUSD / elapsedMs) * totalCycleMs;
+  const projectedProfitUSD = projectedRevenueUSD - expensesUSD;
+  const projectedPercentCovered = (projectedRevenueUSD / expensesUSD) * 100;
+
+  const trackingStatus =
+    projectedRevenueUSD >= expensesUSD
+      ? `✅ On track to break even (projected coverage: ${projectedPercentCovered.toFixed(
+          1
+        )}%)`
+      : `⚠️ Behind pace (projected coverage: ${projectedPercentCovered.toFixed(
+          1
+        )}%)`;
+
+  const percentCovered = (revenueUSD / expensesUSD) * 100;
+  const status =
+    percentCovered >= 100
+      ? "✅ You've covered your monthly expenses!"
+      : `🟡 You've covered ${percentCovered.toFixed(2)}% of your expenses.`;
+
   console.log(`Current SOL price: $${solanaPrice}`);
+  console.log(`\nSince ${startDate.toISOString().split("T")[0]}:`);
+  console.log(`- Revenue: $${revenueUSD.toFixed(2)}`);
+  console.log(`- Expenses: $${expensesUSD.toFixed(2)}`);
+  console.log(`- Coverage so far: ${percentCovered.toFixed(2)}%`);
+  console.log(`- Month elapsed: ${elapsedPercentage.toFixed(2)}%`);
+  console.log(`- ${trackingStatus}`);
+  console.log(`- ${status}`);
 
   console.log(`\nRewards by epoch:`);
   allEpochRewards.forEach((er) => {
