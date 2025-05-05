@@ -1,21 +1,25 @@
 # validatools
 
-A collection of tools for validating data.
+A collection of tools/scripts for Solana validator operators
 
 ## Available Scripts
 
-### `ts-node src/index.ts`
+### TypeScript
 
-Runs the main validation script that checks for duplicate records in a CSV file.
+#### `ts-node ts/monthly-profitability/index.ts`
 
-## Environment Variables
+A script to track monthly validator profitability by calculating revenue from vote account rewards and Jito MEV tips compared against monthly expenses.
+
+~Environment Variables~
 
 The following environment variables are required:
 
-- `CSV_FILE_PATH` - Path to the CSV file to validate
-- `UNIQUE_COLUMNS` - Comma-separated list of column names that should be unique in combination
+- `VOTE_ACCOUNT` - Public key of your validator's vote account
+- `IDENTITY` - Public key of your validator's identity account
+- `MONTHLY_EXPENSES` - Your monthly validator expenses in USD
+- `MONTHLY_BILLING_DAY` - Day of the month (1-31) to start the billing cycle (optional, defaults to 1)
 
-## Example Output
+~Example Output~
 
 When running the script, you'll see output similar to:
 
