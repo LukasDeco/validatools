@@ -10,7 +10,7 @@ A collection of tools/scripts for Solana validator operators
 
 A script to track monthly validator profitability by calculating revenue from vote account rewards and Jito MEV tips compared against monthly expenses.
 
-~Environment Variables~
+**Environment Variables**
 
 The following environment variables are required:
 
@@ -19,7 +19,7 @@ The following environment variables are required:
 - `MONTHLY_EXPENSES` - Your monthly validator expenses in USD
 - `MONTHLY_BILLING_DAY` - Day of the month (1-31) to start the billing cycle (optional, defaults to 1)
 
-~Example Output~
+**Example Output**
 
 When running the script, you'll see output similar to:
 
