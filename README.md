@@ -6,7 +6,7 @@ A collection of tools/scripts for Solana validator operators
 
 ### TypeScript
 
-#### `ts-node ts/monthly-profitability/index.ts`
+#### `ts-node ts/src/monthly-profitability/index.ts`
 
 A script to track monthly validator profitability by calculating revenue from vote account rewards and Jito MEV tips compared against monthly expenses.
 
