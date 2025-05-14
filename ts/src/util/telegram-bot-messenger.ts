@@ -24,8 +24,7 @@ export class TelegramBotMessenger {
         parse_mode: "HTML", // Optional: can be "Markdown" or "HTML"
       });
     } catch (error) {
-      console.error("Failed to send Telegram message:", error);
-      throw error;
+      console.error("Failed to send Telegram message:", error.response.data);
     }
   }
 }
