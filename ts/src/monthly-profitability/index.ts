@@ -42,13 +42,14 @@ async function main() {
     process.env.RPC_URL || "https://api.mainnet-beta.solana.com",
     "confirmed"
   );
-  const voteAccount = new PublicKey(voteAccountAddress);
+
   const now = new Date();
   const startDate = getMostRecentBillingDate(monthlyBillingDay);
   const startDateStr = startDate.toISOString().split("T")[0];
   const currentEpoch = (await connection.getEpochInfo()).epoch;
-  const epochSchedule = await connection.getEpochSchedule();
 
+  // Get start epoch by fetching epoch schedule and calculating epoch at start date
+  const epochSchedule = await connection.getEpochSchedule();
   const recentSlot = await connection.getSlot();
   const recentTimestamp =
     (await connection.getBlockTime(recentSlot)) ||
@@ -63,57 +64,82 @@ async function main() {
   );
   const endEpoch = currentEpoch - 1;
 
+  let totalVoteRewards = 0;
+  let totalJitoRewards = 0;
+  let totalBlockRewards = 0;
+
   await logger.info(
-    `Fetching vote rewards from epoch ${startEpoch} to ${endEpoch}`
+    `Fetching validator rewards from epoch ${startEpoch} to ${endEpoch}`
   );
 
-  const allEpochRewards: {
-    epoch: number;
-    reward: number;
-    commission: number;
-  }[] = [];
+  // First try to get recent epochs from Trillium validator API
+  try {
+    const trilliumValidatorData = await axios
+      .get(`https://api.trillium.so/validator_rewards/${voteAccountAddress}`)
+      .then((res) => res.data);
 
-  for (let epoch = startEpoch; epoch <= endEpoch; epoch++) {
-    try {
-      const rewards = await connection.getInflationReward([voteAccount], epoch);
-      if (rewards && rewards[0]) {
-        allEpochRewards.push({
-          epoch,
-          reward: rewards[0].amount / LAMPORTS_PER_SOL,
-          commission: rewards[0].commission || 0,
-        });
+    // Process last 10 epochs if they fall within our range
+    for (const epochData of trilliumValidatorData) {
+      if (epochData.epoch >= startEpoch && epochData.epoch < endEpoch) {
+        totalVoteRewards +=
+          epochData.total_inflation_reward * (epochData.commission / 100);
+        totalJitoRewards +=
+          epochData.mev_earned * (epochData.mev_commission / 10_000);
+        totalBlockRewards += epochData.rewards || 0;
       }
-    } catch (e) {
-      await logger.warn(`Error fetching rewards for epoch ${epoch}: ${e}`);
+    }
+
+    // Get earliest epoch from validator API response
+    const earliestEpochInAPI = Math.min(
+      ...trilliumValidatorData.map((d) => d.epoch)
+    );
+
+    // Fetch any missing earlier epochs from epoch-specific API
+    if (startEpoch < earliestEpochInAPI) {
+      for (let epoch = startEpoch; epoch < earliestEpochInAPI; epoch++) {
+        const trilliumData = await fetch(
+          `https://api.trillium.so/validator_rewards/${epoch}`
+        ).then((res) => res.json());
+
+        const validatorData = trilliumData.find(
+          (v: any) => v.vote_account_pubkey === voteAccountAddress
+        );
+
+        if (validatorData) {
+          totalVoteRewards +=
+            validatorData.total_inflation_reward *
+              (validatorData.commission / 100) || 0;
+          totalJitoRewards +=
+            validatorData.mev_earned *
+              (validatorData.mev_commission / 10_000) || 0;
+          totalBlockRewards += validatorData.rewards || 0;
+        }
+      }
+    }
+  } catch (err) {
+    // Fallback to epoch-by-epoch API if validator API fails
+    for (let epoch = startEpoch; epoch < endEpoch; epoch++) {
+      const trilliumData = await fetch(
+        `https://api.trillium.so/validator_rewards/${epoch}`
+      ).then((res) => res.json());
+
+      const validatorData = trilliumData.find(
+        (v: any) => v.vote_account_pubkey === voteAccountAddress
+      );
+
+      if (validatorData) {
+        totalVoteRewards +=
+          validatorData.total_inflation_reward *
+            (validatorData.commission / 100) || 0;
+        totalJitoRewards +=
+          validatorData.mev_earned * (validatorData.mev_commission / 10_000) ||
+          0;
+        totalBlockRewards += validatorData.rewards || 0;
+      }
     }
   }
 
-  const totalVoteRewards = allEpochRewards.reduce(
-    (acc, r) => acc + r.reward,
-    0
-  );
-
-  await logger.info("Fetching Jito MEV rewards...");
-  const jitoData = (
-    await axios.get(
-      `https://kobe.mainnet.jito.network/api/v1/validators/${voteAccountAddress}`
-    )
-  ).data as Array<{
-    epoch: number;
-    mev_commission_bps: number;
-    mev_rewards: number;
-  }>;
-
-  const relevantJitoRewards = jitoData.filter(
-    (jr) => jr.epoch >= startEpoch && jr.epoch <= endEpoch
-  );
-
-  const totalJitoRewards = relevantJitoRewards.reduce((sum, jr) => {
-    const effective = jr.mev_rewards * (jr.mev_commission_bps / 10000);
-    return sum + effective / LAMPORTS_PER_SOL;
-  }, 0);
-
-  const totalGainSOL = totalVoteRewards + totalJitoRewards;
+  const totalGainSOL = totalVoteRewards + totalJitoRewards + totalBlockRewards;
 
   const solanaPrice = (
     await axios.get(
@@ -132,6 +158,7 @@ async function main() {
   const elapsedPct = (elapsedMs / totalCycleMs) * 100;
 
   const projectedRevenueUSD = (revenueUSD / elapsedMs) * totalCycleMs;
+  const projectedProfitUSD = projectedRevenueUSD - expensesUSD;
   const projectedPercentCovered = (projectedRevenueUSD / expensesUSD) * 100;
   const percentCovered = (revenueUSD / expensesUSD) * 100;
 
@@ -152,12 +179,14 @@ async function main() {
     `Period: ${startDateStr} → ${new Date().toISOString().split("T")[0]}`,
     `SOL Gained: ${totalGainSOL.toFixed(2)} SOL ($${revenueUSD.toFixed(2)})`,
     `• Vote rewards: ${totalVoteRewards.toFixed(2)} SOL`,
+    `• Block rewards: ${totalBlockRewards.toFixed(2)} SOL`,
     `• Jito tips: ${totalJitoRewards.toFixed(2)} SOL`,
     ``,
     `SOL Price: $${solanaPrice}`,
     `Expenses: $${expensesUSD.toFixed(2)}`,
     `Elapsed: ${elapsedPct.toFixed(2)}%`,
     `Coverage: ${percentCovered.toFixed(2)}%`,
+    `Projected Monthly Profit: $${projectedProfitUSD.toFixed(2)}`,
     trackingStatus,
     status,
   ].join("\n");
