@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "node-cron": "^4.0.7"
+  }
+}

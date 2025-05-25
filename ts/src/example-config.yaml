@@ -1,0 +1,17 @@
+# Monthly profitability checker configuration
+monthlyProfitability:
+  enabled: true
+  schedule: "0 0 * * *" # Run daily at midnight
+  config:
+    voteAccount: "" # Your vote account public key
+    identity: "" # Your validator identity public key
+    monthlyExpenses: "1000" # Monthly expenses in USD
+    monthlyBillingDay: 1 # Day of month to start tracking from
+
+# SFDP compliance checker
+sfdpCompliance:
+  enabled: true
+  schedule: "0 */6 * * *" # Run every 6 hours
+  config:
+    mainnetIdentity: "" # Your mainnet validator identity
+    testnetIdentity: "" # Your testnet validator identity
