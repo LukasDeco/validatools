@@ -179,7 +179,6 @@ export class MonthlyProfitabilityBot {
     const revenueUSD = totalGainSOL * solanaPrice;
     const voteCostUSD = reimbursedVoteCost * solanaPrice;
     const monthlyBaseExpensesUSD = parseFloat(this.monthlyExpenses);
-    const monthlyTotalExpensesUSD = monthlyBaseExpensesUSD + voteCostUSD;
 
     const nextBillingDate = new Date(startDate);
     nextBillingDate.setMonth(startDate.getMonth() + 1);
@@ -187,6 +186,13 @@ export class MonthlyProfitabilityBot {
     const elapsedMs = now.getTime() - startDate.getTime();
     const totalCycleMs = nextBillingDate.getTime() - startDate.getTime();
     const elapsedPct = (elapsedMs / totalCycleMs) * 100;
+
+    // Estimate total vote cost for the month based on current rate
+    const estimatedMonthlyVoteCost =
+      (reimbursedVoteCost / elapsedMs) * totalCycleMs;
+    const estimatedMonthlyVoteCostUSD = estimatedMonthlyVoteCost * solanaPrice;
+    const monthlyTotalExpensesUSD =
+      monthlyBaseExpensesUSD + estimatedMonthlyVoteCostUSD;
 
     // Calculate accrued expenses based on elapsed time
     const accruedBaseExpensesUSD =
@@ -238,7 +244,9 @@ export class MonthlyProfitabilityBot {
       `• Monthly Base Expenses: $${monthlyBaseExpensesUSD.toFixed(2)}`,
       `• Monthly Total Expenses: $${monthlyTotalExpensesUSD.toFixed(
         2
-      )} (including $${voteCostUSD.toFixed(2)} vote costs)`,
+      )} (including estimated $${estimatedMonthlyVoteCostUSD.toFixed(
+        2
+      )} vote costs)`,
       `• Accrued Total Expenses: $${accruedTotalExpensesUSD.toFixed(
         2
       )} (including $${voteCostUSD.toFixed(2)} vote costs)`,
@@ -281,4 +289,4 @@ async function main() {
   await bot.run();
 }
 
-// main().catch((err) => console.error(`Fatal error: ${err.stack || err}`)); // uncomment to run directly
+main().catch((err) => console.error(`Fatal error: ${err.stack || err}`)); // uncomment to run directly
