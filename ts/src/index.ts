@@ -33,16 +33,22 @@ async function main() {
       config.monthlyProfitability?.config?.monthlyExpenses || "";
     const monthlyBillingDay =
       config.monthlyProfitability?.config?.monthlyBillingDay || 1;
+    const voteCostReimbursement =
+      config.monthlyProfitability?.config?.voteCostReimbursement || 0;
 
     const profitabilityBot = new MonthlyProfitabilityBot(
       voteAccountAddress,
       identityAddress,
       monthlyExpenses,
-      monthlyBillingDay
+      monthlyBillingDay,
+      voteCostReimbursement
     );
+
+    await profitabilityBot.run();
 
     cron.schedule(config.monthlyProfitability.schedule, async () => {
       try {
+        console.log("Running monthly profitability bot");
         await profitabilityBot.run();
       } catch (err) {
         console.error(
@@ -59,8 +65,11 @@ async function main() {
       config.sfdpCompliance?.config?.testnetIdentity || ""
     );
 
+    await sfdpChecker.run();
+
     cron.schedule(config.sfdpCompliance.schedule, async () => {
       try {
+        console.log("Running SFDP compliance checker");
         await sfdpChecker.run();
       } catch (err) {
         console.error(
