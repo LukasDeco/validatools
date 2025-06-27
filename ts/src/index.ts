@@ -62,7 +62,8 @@ async function main() {
   if (config.sfdpCompliance?.enabled) {
     const sfdpChecker = new SFDPComplianceBot(
       config.sfdpCompliance?.config?.mainnetIdentity || "",
-      config.sfdpCompliance?.config?.testnetIdentity || ""
+      config.sfdpCompliance?.config?.testnetIdentity || "",
+      config.sfdpCompliance?.config?.onlyLogIssues || false
     );
 
     await sfdpChecker.run();
