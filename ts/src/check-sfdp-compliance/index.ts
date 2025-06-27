@@ -16,14 +16,22 @@ export class SFDPComplianceBot {
   // Env validation
   private mainnetIdentity: string;
   private testnetIdentity: string;
-  constructor(mainnetIdentity: string, testnetIdentity: string) {
+  private onlyLogIssues: boolean;
+
+  constructor(
+    mainnetIdentity: string,
+    testnetIdentity: string,
+    onlyLogIssues = false
+  ) {
     if (!mainnetIdentity || !testnetIdentity) {
       console.error("Missing MAINNET_IDENTITY or TESTNET_IDENTITY env var");
       process.exit(1);
     }
     this.mainnetIdentity = mainnetIdentity;
     this.testnetIdentity = testnetIdentity;
+    this.onlyLogIssues = onlyLogIssues;
   }
+
   logger = new Logger({
     telegramEnabled: process.env.TELEGRAM_ENABLED === "true",
     botToken: process.env.TELEGRAM_BOT_TOKEN,
@@ -142,32 +150,39 @@ export class SFDPComplianceBot {
       ? this.compareVersions(currentVersion, nextRequirement)
       : true;
 
-    const report = [
-      "",
-      `🔍 ${network.toUpperCase()} Validator Version Check`,
-      `Current epoch: ${currentEpoch.epoch}`,
-      `Required ${isFiredancer ? "Firedancer" : "Agave"} version: ${
-        isFiredancer
-          ? currentRequirement.firedancer_min_version
-          : currentRequirement.agave_min_version
-      }`,
-      `Your version: ${currentVersion}`,
-      isValidCurrent
-        ? `✅ Validator is running a sufficient version.`
-        : `❌ Validator version is outdated!`,
-    ];
-
-    if (nextRequirement && !isValidNext) {
-      report.push(
-        `⚠️ Warning: Epoch ${nextRequirement.epoch} will require version ${
+    // Only proceed if there are issues or if we want to log everything
+    if (
+      !this.onlyLogIssues ||
+      !isValidCurrent ||
+      (nextRequirement && !isValidNext)
+    ) {
+      const report = [
+        "",
+        `🔍 ${network.toUpperCase()} Validator Version Check`,
+        `Current epoch: ${currentEpoch.epoch}`,
+        `Required ${isFiredancer ? "Firedancer" : "Agave"} version: ${
           isFiredancer
-            ? nextRequirement.firedancer_min_version
-            : nextRequirement.agave_min_version
-        }`
-      );
-    }
+            ? currentRequirement.firedancer_min_version
+            : currentRequirement.agave_min_version
+        }`,
+        `Your version: ${currentVersion}`,
+        isValidCurrent
+          ? `✅ Validator is running a sufficient version.`
+          : `❌ Validator version is outdated!`,
+      ];
 
-    await this.logger.info(report.join("\n"));
+      if (nextRequirement && !isValidNext) {
+        report.push(
+          `⚠️ Warning: Epoch ${nextRequirement.epoch} will require version ${
+            isFiredancer
+              ? nextRequirement.firedancer_min_version
+              : nextRequirement.agave_min_version
+          }`
+        );
+      }
+
+      await this.logger.info(report.join("\n"));
+    }
   }
 
   async run() {
@@ -179,7 +194,12 @@ export class SFDPComplianceBot {
 async function main() {
   const mainnetIdentity = process.env.MAINNET_IDENTITY;
   const testnetIdentity = process.env.TESTNET_IDENTITY;
-  const bot = new SFDPComplianceBot(mainnetIdentity, testnetIdentity);
+  const onlyLogIssues = process.env.ONLY_LOG_VERSION_ISSUES === "true";
+  const bot = new SFDPComplianceBot(
+    mainnetIdentity,
+    testnetIdentity,
+    onlyLogIssues
+  );
   await bot.run();
 }
 

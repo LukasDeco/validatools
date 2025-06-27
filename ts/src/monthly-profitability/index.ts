@@ -2,21 +2,277 @@ import { Connection } from "@solana/web3.js";
 import axios from "axios";
 import { Logger } from "../util/logger"; // adjust path as needed
 
+interface ValidatorRewards {
+  totalVoteRewards: number;
+  totalJitoRewards: number;
+  totalBlockRewards: number;
+  totalBlocksWithRewards: number;
+  totalVoteCost: number;
+}
+
+interface ProfitabilityReport {
+  startDate: Date;
+  currentDate: Date;
+  endDate: Date;
+  solanaPrice: number;
+  rewards: ValidatorRewards;
+  expenses: {
+    monthlyBaseUSD: number;
+    monthlyTotalUSD: number;
+    accruedTotalUSD: number;
+    voteCostUSD: number;
+    estimatedMonthlyVoteCostUSD: number;
+  };
+  revenue: {
+    totalSOL: number;
+    totalUSD: number;
+    projectedUSD: number;
+  };
+  profit: {
+    currentSOL: number;
+    currentUSD: number;
+    projectedUSD: number;
+  };
+  coverage: {
+    elapsed: number;
+    current: number;
+    projected: number;
+  };
+}
+
+export class RewardsService {
+  constructor(
+    private connection: Connection,
+    private voteAccountAddress: string
+  ) {}
+
+  async fetchRewards(
+    startEpoch: number,
+    endEpoch: number
+  ): Promise<ValidatorRewards> {
+    let totalVoteRewards = 0;
+    let totalJitoRewards = 0;
+    let totalBlockRewards = 0;
+    let totalBlocksWithRewards = 0;
+    let totalVoteCost = 0;
+
+    try {
+      const trilliumValidatorData = await axios
+        .get(
+          `https://api.trillium.so/validator_rewards/${this.voteAccountAddress}`
+        )
+        .then((res) => res.data);
+
+      // Process epochs if they fall within our range
+      for (const epochData of trilliumValidatorData) {
+        if (epochData.epoch >= startEpoch && epochData.epoch < endEpoch) {
+          totalVoteRewards +=
+            epochData.total_inflation_reward * (epochData.commission / 100);
+          totalJitoRewards +=
+            epochData.mev_earned * (epochData.mev_commission / 10_000);
+          totalBlockRewards += epochData.rewards || 0;
+          totalBlocksWithRewards += epochData.rewards > 0 ? 1 : 0;
+          totalVoteCost += epochData.vote_cost || 0;
+        }
+      }
+
+      const earliestEpochInAPI = Math.min(
+        ...trilliumValidatorData.map((d) => d.epoch)
+      );
+
+      if (startEpoch < earliestEpochInAPI) {
+        for (let epoch = startEpoch; epoch < earliestEpochInAPI; epoch++) {
+          const trilliumData = await fetch(
+            `https://api.trillium.so/validator_rewards/${epoch}`
+          ).then((res) => res.json());
+
+          const validatorData = trilliumData.find(
+            (v: any) => v.vote_account_pubkey === this.voteAccountAddress
+          );
+
+          if (validatorData) {
+            totalVoteRewards +=
+              validatorData.total_inflation_reward *
+                (validatorData.commission / 100) || 0;
+            totalJitoRewards +=
+              validatorData.mev_earned *
+                (validatorData.mev_commission / 10_000) || 0;
+            totalBlockRewards += validatorData.rewards || 0;
+            totalVoteCost += validatorData.vote_cost || 0;
+          }
+        }
+      }
+    } catch (err) {
+      // Fallback to epoch-by-epoch API
+      for (let epoch = startEpoch; epoch < endEpoch; epoch++) {
+        const trilliumData = await fetch(
+          `https://api.trillium.so/validator_rewards/${epoch}`
+        ).then((res) => res.json());
+
+        const validatorData = trilliumData.find(
+          (v: any) => v.vote_account_pubkey === this.voteAccountAddress
+        );
+
+        if (validatorData) {
+          totalVoteRewards +=
+            validatorData.total_inflation_reward *
+              (validatorData.commission / 100) || 0;
+          totalJitoRewards +=
+            validatorData.mev_earned *
+              (validatorData.mev_commission / 10_000) || 0;
+          totalBlockRewards += validatorData.rewards || 0;
+          totalVoteCost += validatorData.vote_cost || 0;
+        }
+      }
+    }
+
+    return {
+      totalVoteRewards,
+      totalJitoRewards,
+      totalBlockRewards,
+      totalBlocksWithRewards,
+      totalVoteCost,
+    };
+  }
+}
+
+export class ProfitabilityReportService {
+  constructor(
+    private monthlyExpenses: number,
+    private voteCostReimbursement: number = 0
+  ) {}
+
+  async generateReport(
+    startDate: Date,
+    currentDate: Date,
+    endDate: Date,
+    rewards: ValidatorRewards
+  ): Promise<string> {
+    const solanaPrice = (
+      await axios.get(
+        "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd"
+      )
+    ).data.solana.usd;
+
+    const reimbursedVoteCost =
+      rewards.totalVoteCost * (1 - this.voteCostReimbursement / 100);
+
+    // Calculate net SOL gained (revenue - vote costs)
+    const totalRevenueSOL =
+      rewards.totalVoteRewards +
+      rewards.totalJitoRewards +
+      rewards.totalBlockRewards;
+    const netGainSOL = totalRevenueSOL - reimbursedVoteCost;
+
+    // Calculate elapsed time percentages
+    const elapsedMs = currentDate.getTime() - startDate.getTime();
+    const totalCycleMs = endDate.getTime() - startDate.getTime();
+    const elapsedPct = (elapsedMs / totalCycleMs) * 100;
+
+    // Project monthly SOL earnings based on current rate
+    const projectedMonthlySOL = (netGainSOL / elapsedMs) * totalCycleMs;
+    const projectedMonthlyUSD = projectedMonthlySOL * solanaPrice;
+
+    // Calculate projected monthly profit
+    const projectedProfitUSD = projectedMonthlyUSD - this.monthlyExpenses;
+    const percentCovered = (projectedMonthlyUSD / this.monthlyExpenses) * 100;
+
+    // Current period actuals
+    const currentNetGainUSD = netGainSOL * solanaPrice;
+    const accruedExpensesUSD =
+      (this.monthlyExpenses * elapsedMs) / totalCycleMs;
+    const currentProfitUSD = currentNetGainUSD - accruedExpensesUSD;
+    const currentPercentCovered =
+      (currentNetGainUSD / accruedExpensesUSD) * 100;
+
+    const onTrackOutcome =
+      projectedMonthlyUSD > this.monthlyExpenses ? "make profit" : "break even";
+    const trackingStatus =
+      projectedMonthlyUSD >= this.monthlyExpenses
+        ? `✅ On track to ${onTrackOutcome} (projected: ${percentCovered.toFixed(
+            1
+          )}%)`
+        : `⚠️ Behind pace (projected: ${percentCovered.toFixed(1)}%)`;
+
+    const status =
+      currentPercentCovered >= 100
+        ? "✅ You've covered your accrued expenses!"
+        : `🟡 You've covered ${currentPercentCovered.toFixed(
+            2
+          )}% of accrued expenses.`;
+
+    return [
+      `🧾 Validator Profit Report`,
+      `SOL Price: $${solanaPrice}`,
+      `Period: ${startDate.toISOString().split("T")[0]} → ${
+        currentDate.toISOString().split("T")[0]
+      }`,
+      "",
+      "---Revenues---",
+      `Revenue: ${totalRevenueSOL.toFixed(2)} SOL ($${(
+        totalRevenueSOL * solanaPrice
+      ).toFixed(2)})`,
+      `• Vote rewards: ${rewards.totalVoteRewards.toFixed(2)} SOL`,
+      `• Block rewards: ${rewards.totalBlockRewards.toFixed(2)} SOL`,
+      `• Jito tips: ${rewards.totalJitoRewards.toFixed(2)} SOL`,
+      "",
+      "---Expenses---",
+      `• Vote costs: ${reimbursedVoteCost.toFixed(2)} SOL${
+        this.voteCostReimbursement > 0
+          ? ` (${this.voteCostReimbursement}% reimbursed)`
+          : ""
+      }`,
+      `• Monthly Base Expenses: $${this.monthlyExpenses.toFixed(2)}`,
+      `• Accrued Base Expenses: $${accruedExpensesUSD.toFixed(2)}`,
+      "",
+      "Summary:",
+      `• Net SOL Gained: ${netGainSOL.toFixed(
+        2
+      )} SOL ($${currentNetGainUSD.toFixed(2)})`,
+      `• Current Period Profit: $${currentProfitUSD.toFixed(2)}`,
+      `• Elapsed: ${elapsedPct.toFixed(2)}%`,
+      `• Current Coverage: ${currentPercentCovered.toFixed(2)}%`,
+      `• Projected Monthly Net: ${projectedMonthlySOL.toFixed(
+        2
+      )} SOL ($${projectedMonthlyUSD.toFixed(2)})`,
+      `• Projected Monthly Profit: $${projectedProfitUSD.toFixed(2)}`,
+      trackingStatus,
+      status,
+    ].join("\n");
+  }
+}
+
+// TODO: does math make sense? It should just be monthly base expenses - SOL projected to be gained * price(just SOL rev - vote costs)
 export class MonthlyProfitabilityBot {
+  private logger: Logger;
+  private rewardsService: RewardsService;
+  private profitabilityReportService: ProfitabilityReportService;
+
   constructor(
     private voteAccountAddress: string,
     private identityAddress: string,
     private monthlyExpenses: string,
     private monthlyBillingDay: number,
     private voteCostReimbursement: number = 0
-  ) {}
+  ) {
+    this.logger = new Logger({
+      telegramEnabled: process.env.TELEGRAM_ENABLED === "true",
+      botToken: process.env.TELEGRAM_BOT_TOKEN,
+      chatId: process.env.TELEGRAM_CHAT_ID,
+      prefix: "[ValidatorTracker] ",
+    });
 
-  logger: Logger = new Logger({
-    telegramEnabled: process.env.TELEGRAM_ENABLED === "true",
-    botToken: process.env.TELEGRAM_BOT_TOKEN,
-    chatId: process.env.TELEGRAM_CHAT_ID,
-    prefix: "[ValidatorTracker] ",
-  });
+    const connection = new Connection(
+      process.env.RPC_URL || "https://api.mainnet-beta.solana.com",
+      "confirmed"
+    );
+
+    this.rewardsService = new RewardsService(connection, voteAccountAddress);
+    this.profitabilityReportService = new ProfitabilityReportService(
+      parseFloat(monthlyExpenses),
+      voteCostReimbursement
+    );
+  }
 
   getMostRecentBillingDate(targetDay: number): Date {
     const today = new Date();
@@ -54,17 +310,17 @@ export class MonthlyProfitabilityBot {
       process.exit(1);
     }
 
+    const now = new Date();
+    const startDate = this.getMostRecentBillingDate(this.monthlyBillingDay);
+    const nextBillingDate = new Date(startDate);
+    nextBillingDate.setMonth(startDate.getMonth() + 1);
+
     const connection = new Connection(
       process.env.RPC_URL || "https://api.mainnet-beta.solana.com",
       "confirmed"
     );
 
-    const now = new Date();
-    const startDate = this.getMostRecentBillingDate(this.monthlyBillingDay);
-    const startDateStr = startDate.toISOString().split("T")[0];
     const currentEpoch = (await connection.getEpochInfo()).epoch;
-
-    // Get start epoch by fetching epoch schedule and calculating epoch at start date
     const epochSchedule = await connection.getEpochSchedule();
     const recentSlot = await connection.getSlot();
     const recentTimestamp =
@@ -80,192 +336,22 @@ export class MonthlyProfitabilityBot {
     );
     const endEpoch = currentEpoch - 1;
 
-    let totalVoteRewards = 0;
-    let totalJitoRewards = 0;
-    let totalBlockRewards = 0;
-    let totalBlocksWithRewards = 0;
-    let totalVoteCost = 0;
-
     await this.logger.info(
       `Fetching validator rewards from epoch ${startEpoch} to ${endEpoch}`
     );
 
-    // First try to get recent epochs from Trillium validator API
-    try {
-      const trilliumValidatorData = await axios
-        .get(
-          `https://api.trillium.so/validator_rewards/${this.voteAccountAddress}`
-        )
-        .then((res) => res.data);
+    const rewards = await this.rewardsService.fetchRewards(
+      startEpoch,
+      endEpoch
+    );
+    const report = await this.profitabilityReportService.generateReport(
+      startDate,
+      now,
+      nextBillingDate,
+      rewards
+    );
 
-      // Process last 10 epochs if they fall within our range
-      for (const epochData of trilliumValidatorData) {
-        if (epochData.epoch >= startEpoch && epochData.epoch < endEpoch) {
-          totalVoteRewards +=
-            epochData.total_inflation_reward * (epochData.commission / 100);
-          totalJitoRewards +=
-            epochData.mev_earned * (epochData.mev_commission / 10_000);
-          totalBlockRewards += epochData.rewards || 0;
-          totalBlocksWithRewards += epochData.rewards > 0 ? 1 : 0;
-          totalVoteCost += epochData.vote_cost || 0;
-        }
-      }
-
-      // Get earliest epoch from validator API response
-      const earliestEpochInAPI = Math.min(
-        ...trilliumValidatorData.map((d) => d.epoch)
-      );
-
-      // Fetch any missing earlier epochs from epoch-specific API
-      if (startEpoch < earliestEpochInAPI) {
-        for (let epoch = startEpoch; epoch < earliestEpochInAPI; epoch++) {
-          const trilliumData = await fetch(
-            `https://api.trillium.so/validator_rewards/${epoch}`
-          ).then((res) => res.json());
-
-          const validatorData = trilliumData.find(
-            (v: any) => v.vote_account_pubkey === this.voteAccountAddress
-          );
-
-          if (validatorData) {
-            totalVoteRewards +=
-              validatorData.total_inflation_reward *
-                (validatorData.commission / 100) || 0;
-            totalJitoRewards +=
-              validatorData.mev_earned *
-                (validatorData.mev_commission / 10_000) || 0;
-            totalBlockRewards += validatorData.rewards || 0;
-            totalVoteCost += validatorData.vote_cost || 0;
-          }
-        }
-      }
-    } catch (err) {
-      // Fallback to epoch-by-epoch API if validator API fails
-      for (let epoch = startEpoch; epoch < endEpoch; epoch++) {
-        const trilliumData = await fetch(
-          `https://api.trillium.so/validator_rewards/${epoch}`
-        ).then((res) => res.json());
-
-        const validatorData = trilliumData.find(
-          (v: any) => v.vote_account_pubkey === this.voteAccountAddress
-        );
-
-        if (validatorData) {
-          totalVoteRewards +=
-            validatorData.total_inflation_reward *
-              (validatorData.commission / 100) || 0;
-          totalJitoRewards +=
-            validatorData.mev_earned *
-              (validatorData.mev_commission / 10_000) || 0;
-          totalBlockRewards += validatorData.rewards || 0;
-          totalVoteCost += validatorData.vote_cost || 0;
-        }
-      }
-    }
-
-    // Apply vote cost reimbursement
-    const reimbursedVoteCost =
-      totalVoteCost * (1 - this.voteCostReimbursement / 100);
-
-    const solanaPrice = (
-      await axios.get(
-        "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd"
-      )
-    ).data.solana.usd;
-
-    const totalRevenueSOL =
-      totalVoteRewards + totalJitoRewards + totalBlockRewards;
-    const totalGainSOL = totalRevenueSOL - reimbursedVoteCost;
-    const revenueUSD = totalGainSOL * solanaPrice;
-    const voteCostUSD = reimbursedVoteCost * solanaPrice;
-    const monthlyBaseExpensesUSD = parseFloat(this.monthlyExpenses);
-
-    const nextBillingDate = new Date(startDate);
-    nextBillingDate.setMonth(startDate.getMonth() + 1);
-
-    const elapsedMs = now.getTime() - startDate.getTime();
-    const totalCycleMs = nextBillingDate.getTime() - startDate.getTime();
-    const elapsedPct = (elapsedMs / totalCycleMs) * 100;
-
-    // Estimate total vote cost for the month based on current rate
-    const estimatedMonthlyVoteCost =
-      (reimbursedVoteCost / elapsedMs) * totalCycleMs;
-    const estimatedMonthlyVoteCostUSD = estimatedMonthlyVoteCost * solanaPrice;
-    const monthlyTotalExpensesUSD =
-      monthlyBaseExpensesUSD + estimatedMonthlyVoteCostUSD;
-
-    // Calculate accrued expenses based on elapsed time
-    const accruedBaseExpensesUSD =
-      (monthlyBaseExpensesUSD * elapsedMs) / totalCycleMs;
-    const accruedTotalExpensesUSD = accruedBaseExpensesUSD + voteCostUSD;
-
-    const projectedRevenueUSD = (revenueUSD / elapsedMs) * totalCycleMs;
-    const projectedProfitUSD = projectedRevenueUSD - monthlyTotalExpensesUSD;
-    const projectedPercentCovered =
-      (projectedRevenueUSD / monthlyTotalExpensesUSD) * 100;
-    const percentCovered = (revenueUSD / accruedTotalExpensesUSD) * 100;
-
-    const onTrackOutcome =
-      projectedRevenueUSD > monthlyTotalExpensesUSD
-        ? "make profit"
-        : "break even";
-
-    const trackingStatus =
-      projectedRevenueUSD >= monthlyTotalExpensesUSD
-        ? `✅ On track to ${onTrackOutcome} (projected: ${projectedPercentCovered.toFixed(
-            1
-          )}%)`
-        : `⚠️ Behind pace (projected: ${projectedPercentCovered.toFixed(1)}%)`;
-
-    const status =
-      percentCovered >= 100
-        ? "✅ You've covered your accrued expenses!"
-        : `🟡 You've covered ${percentCovered.toFixed(
-            2
-          )}% of accrued expenses.`;
-
-    const summary = [
-      `🧾 Validator Profit Report`,
-      `SOL Price: $${solanaPrice}`,
-      `Period: ${startDateStr} → ${new Date().toISOString().split("T")[0]}`,
-      "",
-      "---Revenues---",
-      `Revenue: ${totalRevenueSOL.toFixed(2)} SOL ($${revenueUSD.toFixed(2)})`,
-      `• Vote rewards: ${totalVoteRewards.toFixed(2)} SOL`,
-      `• Block rewards: ${totalBlockRewards.toFixed(2)} SOL`,
-      `• Jito tips: ${totalJitoRewards.toFixed(2)} SOL`,
-      "",
-      "---Expenses---",
-      `• Vote costs: ${reimbursedVoteCost.toFixed(2)} SOL${
-        this.voteCostReimbursement > 0
-          ? ` (${this.voteCostReimbursement}% reimbursed)`
-          : ""
-      }`,
-      `• Monthly Base Expenses: $${monthlyBaseExpensesUSD.toFixed(2)}`,
-      `• Monthly Total Expenses: $${monthlyTotalExpensesUSD.toFixed(
-        2
-      )} (including estimated $${estimatedMonthlyVoteCostUSD.toFixed(
-        2
-      )} vote costs)`,
-      `• Accrued Total Expenses: $${accruedTotalExpensesUSD.toFixed(
-        2
-      )} (including $${voteCostUSD.toFixed(2)} vote costs)`,
-      "",
-      "Summary:",
-      `• SOL Gained: ${totalGainSOL.toFixed(2)} SOL ($${revenueUSD.toFixed(
-        2
-      )})`,
-      `• Current accrued profit: $${(
-        revenueUSD - accruedTotalExpensesUSD
-      ).toFixed(2)}`,
-      `• Elapsed: ${elapsedPct.toFixed(2)}%`,
-      `• Coverage: ${percentCovered.toFixed(2)}%`,
-      `• Projected Monthly Profit: $${projectedProfitUSD.toFixed(2)}`,
-      trackingStatus,
-      status,
-    ].join("\n");
-
-    await this.logger.info(summary);
+    await this.logger.info(report);
   }
 }
 
@@ -279,6 +365,7 @@ async function main() {
   const voteCostReimbursement: number = parseFloat(
     process.env.VOTE_COST_REIMBURSEMENT || "0"
   );
+
   const bot = new MonthlyProfitabilityBot(
     voteAccountAddress,
     identityAddress,
@@ -289,4 +376,4 @@ async function main() {
   await bot.run();
 }
 
-main().catch((err) => console.error(`Fatal error: ${err.stack || err}`)); // uncomment to run directly
+// main().catch((err) => console.error(`Fatal error: ${err.stack || err}`)); // uncomment to run directly
