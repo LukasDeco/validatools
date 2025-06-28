@@ -17,11 +17,15 @@ export class SFDPComplianceBot {
   private mainnetIdentity: string;
   private testnetIdentity: string;
   private onlyLogIssues: boolean;
+  private mainnetVersion?: string;
+  private testnetVersion?: string;
 
   constructor(
     mainnetIdentity: string,
     testnetIdentity: string,
-    onlyLogIssues = false
+    onlyLogIssues = false,
+    mainnetVersion?: string,
+    testnetVersion?: string
   ) {
     if (!mainnetIdentity || !testnetIdentity) {
       console.error("Missing MAINNET_IDENTITY or TESTNET_IDENTITY env var");
@@ -30,6 +34,8 @@ export class SFDPComplianceBot {
     this.mainnetIdentity = mainnetIdentity;
     this.testnetIdentity = testnetIdentity;
     this.onlyLogIssues = onlyLogIssues;
+    this.mainnetVersion = mainnetVersion;
+    this.testnetVersion = testnetVersion;
   }
 
   logger = new Logger({
@@ -51,8 +57,18 @@ export class SFDPComplianceBot {
 
   async fetchCurrentValidatorVersion(
     connection: Connection,
-    voteAccountPk: PublicKey
+    voteAccountPk: PublicKey,
+    network: "mainnet" | "testnet"
   ): Promise<string | undefined> {
+    // If version was provided in constructor, use that instead of fetching
+    if (network === "mainnet" && this.mainnetVersion) {
+      return this.mainnetVersion;
+    }
+    if (network === "testnet" && this.testnetVersion) {
+      return this.testnetVersion;
+    }
+
+    // Otherwise fetch from RPC
     const nodes = await connection.getClusterNodes();
     const match = nodes.find(
       (node) => node.pubkey === voteAccountPk.toBase58()
@@ -119,7 +135,8 @@ export class SFDPComplianceBot {
     const requiredVersions = await this.fetchRequiredVersions(network);
     const currentVersion = await this.fetchCurrentValidatorVersion(
       connection,
-      identityPk
+      identityPk,
+      network
     );
 
     if (!currentVersion) {
@@ -195,10 +212,14 @@ async function main() {
   const mainnetIdentity = process.env.MAINNET_IDENTITY;
   const testnetIdentity = process.env.TESTNET_IDENTITY;
   const onlyLogIssues = process.env.ONLY_LOG_VERSION_ISSUES === "true";
+  const mainnetVersion = process.env.MAINNET_VERSION;
+  const testnetVersion = process.env.TESTNET_VERSION;
   const bot = new SFDPComplianceBot(
     mainnetIdentity,
     testnetIdentity,
-    onlyLogIssues
+    onlyLogIssues,
+    mainnetVersion,
+    testnetVersion
   );
   await bot.run();
 }
