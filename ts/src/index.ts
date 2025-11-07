@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as cron from "node-cron";
 import { MonthlyProfitabilityBot } from "./monthly-profitability";
 import { SFDPComplianceBot } from "./check-sfdp-compliance";
+import { DoublezeroDepositBot } from "./doublezero-deposit";
 import yargs from "yargs";
 
 interface ToolConfig {
@@ -15,6 +16,7 @@ interface Config {
   monthlyProfitability?: ToolConfig;
   stakePoolOpportunities?: ToolConfig;
   sfdpCompliance?: ToolConfig;
+  doublezeroDeposit?: ToolConfig;
 }
 
 async function main() {
@@ -69,6 +71,19 @@ async function main() {
     .option("sfdp-testnet-version", {
       type: "string",
       description: "Override testnet version for SFDP compliance",
+    })
+    // DoubleZero deposit args
+    .option("dz-mainnet-identity", {
+      type: "string",
+      description: "Validator node identity public key for DoubleZero deposit",
+    })
+    .option("dz-threshold-sol", {
+      type: "number",
+      description: "Minimum SOL threshold for DoubleZero deposit",
+    })
+    .option("dz-program-id", {
+      type: "string",
+      description: "Override DoubleZero program ID",
     })
     .help().argv;
 
@@ -150,6 +165,42 @@ async function main() {
         } catch (err) {
           console.error(
             `Error running SFDP compliance checker: ${err.stack || err}`
+          );
+        }
+      });
+    }
+  }
+
+  // Set up DoubleZero deposit monitor if enabled
+  if (config.doublezeroDeposit?.enabled) {
+    const nodeId =
+      (argv["dz-node-id"] as string) ||
+      (config.doublezeroDeposit?.config?.mainnetIdentity as string) ||
+      "";
+    const thresholdSol =
+      (argv["dz-threshold-sol"] as number) ||
+      (config.doublezeroDeposit?.config?.thresholdSol as number) ||
+      0;
+    const programId =
+      (argv["dz-program-id"] as string) ||
+      (config.doublezeroDeposit?.config?.programId as string) ||
+      undefined;
+
+    const dzBot = new DoublezeroDepositBot(
+      nodeId,
+      Number(thresholdSol),
+      programId
+    );
+
+    await dzBot.run();
+    if (config.doublezeroDeposit.schedule) {
+      cron.schedule(config.doublezeroDeposit.schedule, async () => {
+        try {
+          console.log("Running DoubleZero deposit monitor");
+          await dzBot.run();
+        } catch (err) {
+          console.error(
+            `Error running DoubleZero deposit monitor: ${err.stack || err}`
           );
         }
       });
