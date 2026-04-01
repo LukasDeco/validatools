@@ -1,6 +1,6 @@
-import axios from "axios";
-import { Connection, PublicKey } from "@solana/web3.js";
-import { Logger } from "../util/logger";
+import axios from 'axios';
+import { Connection, PublicKey } from '@solana/web3.js';
+import { Logger } from '../util/logger';
 
 interface VersionRequirement {
   cluster: string;
@@ -10,6 +10,41 @@ interface VersionRequirement {
   firedancer_min_version: string;
   firedancer_max_version: string | null;
   inherited_from_prev_epoch: boolean;
+}
+
+/**
+ * Parse Firedancer version strings from RPC into a comparable 4-tuple.
+ * Supports legacy `0.902.40002` (patch is 5 digits) and semver-style
+ * `0.902.0-beta.40002` (prerelease carries the 5-digit build).
+ */
+function parseFiredancerVersion(
+  v: string
+): [number, number, number, number] | null {
+  const s = v.trim();
+  const beta = /^(\d+)\.(\d+)\.(\d+)-beta\.(\d{5})$/.exec(s);
+  if (beta) {
+    return [+beta[1], +beta[2], +beta[3], +beta[4]];
+  }
+  const legacy = /^(\d+)\.(\d+)\.(\d{5})$/.exec(s);
+  if (legacy) {
+    return [+legacy[1], +legacy[2], 0, +legacy[3]];
+  }
+  return null;
+}
+
+function isFiredancerVersionString(v: string): boolean {
+  return parseFiredancerVersion(v) !== null;
+}
+
+function compareFiredancerTuples(
+  a: [number, number, number, number],
+  b: [number, number, number, number]
+): number {
+  for (let i = 0; i < 4; i++) {
+    if (a[i] > b[i]) return 1;
+    if (a[i] < b[i]) return -1;
+  }
+  return 0;
 }
 
 export class SFDPComplianceBot {
@@ -28,7 +63,7 @@ export class SFDPComplianceBot {
     testnetVersion?: string
   ) {
     if (!mainnetIdentity || !testnetIdentity) {
-      console.error("Missing MAINNET_IDENTITY or TESTNET_IDENTITY env var");
+      console.error('Missing MAINNET_IDENTITY or TESTNET_IDENTITY env var');
       process.exit(1);
     }
     this.mainnetIdentity = mainnetIdentity;
@@ -39,16 +74,16 @@ export class SFDPComplianceBot {
   }
 
   logger = new Logger({
-    telegramEnabled: process.env.TELEGRAM_ENABLED === "true",
+    telegramEnabled: process.env.TELEGRAM_ENABLED === 'true',
     botToken: process.env.TELEGRAM_BOT_TOKEN,
     chatId: process.env.TELEGRAM_CHAT_ID,
-    prefix: "[ValidatorVersionCheck] ",
+    prefix: '[ValidatorVersionCheck] ',
   });
 
   async fetchRequiredVersions(
-    network: "mainnet" | "testnet"
+    network: 'mainnet' | 'testnet'
   ): Promise<VersionRequirement[]> {
-    const cluster = network === "mainnet" ? "mainnet-beta" : network;
+    const cluster = network === 'mainnet' ? 'mainnet-beta' : network;
     const response = await axios.get(
       `https://api.solana.org/api/epoch/required_versions?cluster=${cluster}`
     );
@@ -58,13 +93,13 @@ export class SFDPComplianceBot {
   async fetchCurrentValidatorVersion(
     connection: Connection,
     voteAccountPk: PublicKey,
-    network: "mainnet" | "testnet"
+    network: 'mainnet' | 'testnet'
   ): Promise<string | undefined> {
     // If version was provided in constructor, use that instead of fetching
-    if (network === "mainnet" && this.mainnetVersion) {
+    if (network === 'mainnet' && this.mainnetVersion) {
       return this.mainnetVersion;
     }
-    if (network === "testnet" && this.testnetVersion) {
+    if (network === 'testnet' && this.testnetVersion) {
       return this.testnetVersion;
     }
 
@@ -80,56 +115,44 @@ export class SFDPComplianceBot {
     current: string,
     required: { agave_min_version: string; firedancer_min_version: string }
   ): boolean {
-    // Detect if running Firedancer by checking version format (x.xxx.xxxxx)
-    const isFiredancer = /^\d\.\d{3}\.\d{5}$/.test(current);
+    const fdCurrent = parseFiredancerVersion(current);
+    const fdRequired = parseFiredancerVersion(required.firedancer_min_version);
 
-    // Compare against appropriate required version
-    const requiredVersion = isFiredancer
-      ? required.firedancer_min_version
-      : required.agave_min_version;
-
-    if (isFiredancer) {
-      // For Firedancer, compare each part numerically
-      const [currentMajor, currentMinor, currentPatch] = current
-        .split(".")
-        .map(Number);
-      const [reqMajor, reqMinor, reqPatch] = requiredVersion
-        .split(".")
-        .map(Number);
-
-      if (currentMajor > reqMajor) return true;
-      if (currentMajor < reqMajor) return false;
-      if (currentMinor > reqMinor) return true;
-      if (currentMinor < reqMinor) return false;
-      if (currentPatch >= reqPatch) return true;
-      return false;
-    } else {
-      // For Agave, compare semver
-      const normalize = (v: string) => v.replace(/[^\d.]/g, "");
-      const [a, b] = [normalize(current), normalize(requiredVersion)];
-      const aParts = a.split(".").map(Number);
-      const bParts = b.split(".").map(Number);
-
-      for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
-        const aVal = aParts[i] ?? 0;
-        const bVal = bParts[i] ?? 0;
-        if (aVal > bVal) return true;
-        if (aVal < bVal) return false;
+    if (fdCurrent !== null) {
+      if (fdRequired !== null) {
+        return compareFiredancerTuples(fdCurrent, fdRequired) >= 0;
       }
+      // API minimum not in a known Firedancer shape; treat as satisfied to avoid false Agave compare
       return true;
     }
+
+    const requiredVersion = required.agave_min_version;
+
+    // For Agave, compare semver
+    const normalize = (v: string) => v.replace(/[^\d.]/g, '');
+    const [a, b] = [normalize(current), normalize(requiredVersion)];
+    const aParts = a.split('.').map(Number);
+    const bParts = b.split('.').map(Number);
+
+    for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
+      const aVal = aParts[i] ?? 0;
+      const bVal = bParts[i] ?? 0;
+      if (aVal > bVal) return true;
+      if (aVal < bVal) return false;
+    }
+    return true;
   }
 
-  async checkNetwork(network: "mainnet" | "testnet") {
+  async checkNetwork(network: 'mainnet' | 'testnet') {
     const connection = new Connection(
-      network === "mainnet"
-        ? process.env.MAINNET_RPC_URL || "https://api.mainnet-beta.solana.com"
-        : process.env.TESTNET_RPC_URL || "https://api.testnet.solana.com",
-      "confirmed"
+      network === 'mainnet'
+        ? process.env.MAINNET_RPC_URL || 'https://api.mainnet-beta.solana.com'
+        : process.env.TESTNET_RPC_URL || 'https://api.testnet.solana.com',
+      'confirmed'
     );
 
     const identityPk = new PublicKey(
-      network === "mainnet" ? this.mainnetIdentity : this.testnetIdentity
+      network === 'mainnet' ? this.mainnetIdentity : this.testnetIdentity
     );
 
     const requiredVersions = await this.fetchRequiredVersions(network);
@@ -158,7 +181,7 @@ export class SFDPComplianceBot {
       .filter((v) => v.epoch > currentEpoch.epoch)
       .sort((a, b) => a.epoch - b.epoch)[0];
 
-    const isFiredancer = /^\d\.\d{3}\.\d{5}$/.test(currentVersion);
+    const isFiredancer = isFiredancerVersionString(currentVersion);
     const isValidCurrent = this.compareVersions(
       currentVersion,
       currentRequirement
@@ -174,10 +197,10 @@ export class SFDPComplianceBot {
       (nextRequirement && !isValidNext)
     ) {
       const report = [
-        "",
+        '',
         `🔍 ${network.toUpperCase()} Validator Version Check`,
         `Current epoch: ${currentEpoch.epoch}`,
-        `Required ${isFiredancer ? "Firedancer" : "Agave"} version: ${
+        `Required ${isFiredancer ? 'Firedancer' : 'Agave'} version: ${
           isFiredancer
             ? currentRequirement.firedancer_min_version
             : currentRequirement.agave_min_version
@@ -198,20 +221,20 @@ export class SFDPComplianceBot {
         );
       }
 
-      await this.logger.info(report.join("\n"));
+      await this.logger.info(report.join('\n'));
     }
   }
 
   async run() {
-    await this.checkNetwork("mainnet");
-    await this.checkNetwork("testnet");
+    await this.checkNetwork('mainnet');
+    await this.checkNetwork('testnet');
   }
 }
 
 async function main() {
   const mainnetIdentity = process.env.MAINNET_IDENTITY;
   const testnetIdentity = process.env.TESTNET_IDENTITY;
-  const onlyLogIssues = process.env.ONLY_LOG_VERSION_ISSUES === "true";
+  const onlyLogIssues = process.env.ONLY_LOG_VERSION_ISSUES === 'true';
   const mainnetVersion = process.env.MAINNET_VERSION;
   const testnetVersion = process.env.TESTNET_VERSION;
   const bot = new SFDPComplianceBot(
