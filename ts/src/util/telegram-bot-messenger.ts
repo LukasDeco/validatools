@@ -1,5 +1,3 @@
-import axios from "axios";
-
 export class TelegramBotMessenger {
   private botToken: string;
   private chatId: string;
@@ -18,13 +16,21 @@ export class TelegramBotMessenger {
   async sendMessage(message: string): Promise<void> {
     try {
       const url = `${this.apiUrl}/sendMessage`;
-      await axios.post(url, {
-        chat_id: this.chatId,
-        text: message,
-        parse_mode: "HTML", // Optional: can be "Markdown" or "HTML"
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: this.chatId,
+          text: message,
+          parse_mode: "HTML", // Optional: can be "Markdown" or "HTML"
+        }),
       });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        console.error("Failed to send Telegram message:", res.status, body);
+      }
     } catch (error) {
-      console.error("Failed to send Telegram message:", error.response.data);
+      console.error("Failed to send Telegram message:", error);
     }
   }
 }
