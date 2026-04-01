@@ -1,5 +1,4 @@
 import { Connection } from "@solana/web3.js";
-import axios from "axios";
 import { Logger } from "../util/logger"; // adjust path as needed
 
 interface ValidatorRewards {
@@ -57,11 +56,13 @@ export class RewardsService {
     let totalVoteCost = 0;
 
     try {
-      const trilliumValidatorData = await axios
-        .get(
-          `https://api.trillium.so/validator_rewards/${this.voteAccountAddress}`
-        )
-        .then((res) => res.data);
+      const trilliumRes = await fetch(
+        `https://api.trillium.so/validator_rewards/${this.voteAccountAddress}`
+      );
+      if (!trilliumRes.ok) {
+        throw new Error(`trillium ${trilliumRes.status}`);
+      }
+      const trilliumValidatorData = await trilliumRes.json();
 
       // Process epochs if they fall within our range
       for (const epochData of trilliumValidatorData) {
@@ -148,11 +149,14 @@ export class ProfitabilityReportService {
     endDate: Date,
     rewards: ValidatorRewards
   ): Promise<string> {
-    const solanaPrice = (
-      await axios.get(
-        "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd"
-      )
-    ).data.solana.usd;
+    const cgRes = await fetch(
+      "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd"
+    );
+    if (!cgRes.ok) {
+      throw new Error(`coingecko ${cgRes.status}`);
+    }
+    const cgJson = (await cgRes.json()) as { solana: { usd: number } };
+    const solanaPrice = cgJson.solana.usd;
 
     const reimbursedVoteCost =
       rewards.totalVoteCost * (1 - this.voteCostReimbursement / 100);

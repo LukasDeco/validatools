@@ -1,4 +1,3 @@
-import axios from 'axios';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { Logger } from '../util/logger';
 
@@ -84,10 +83,15 @@ export class SFDPComplianceBot {
     network: 'mainnet' | 'testnet'
   ): Promise<VersionRequirement[]> {
     const cluster = network === 'mainnet' ? 'mainnet-beta' : network;
-    const response = await axios.get(
-      `https://api.solana.org/api/epoch/required_versions?cluster=${cluster}`
-    );
-    return response.data.data;
+    const url = `https://api.solana.org/api/epoch/required_versions?cluster=${cluster}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(
+        `required_versions ${res.status}: ${await res.text().catch(() => '')}`
+      );
+    }
+    const json = (await res.json()) as { data: VersionRequirement[] };
+    return json.data;
   }
 
   async fetchCurrentValidatorVersion(
