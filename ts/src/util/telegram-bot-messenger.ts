@@ -5,7 +5,7 @@ export class TelegramBotMessenger {
 
   constructor(botToken: string, chatId: string) {
     if (!botToken || !chatId) {
-      throw new Error("Bot token and chat ID are required.");
+      throw new Error('Bot token and chat ID are required.');
     }
 
     this.botToken = botToken;
@@ -14,23 +14,28 @@ export class TelegramBotMessenger {
   }
 
   async sendMessage(message: string): Promise<void> {
+    await this.sendMessageToChat(this.chatId, message);
+  }
+
+  /** Same bot token; different destination (e.g. critical alerts group). */
+  async sendMessageToChat(chatId: string, message: string): Promise<void> {
     try {
       const url = `${this.apiUrl}/sendMessage`;
       const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          chat_id: this.chatId,
+          chat_id: chatId,
           text: message,
-          parse_mode: "HTML", // Optional: can be "Markdown" or "HTML"
+          parse_mode: 'HTML', // Optional: can be "Markdown" or "HTML"
         }),
       });
       if (!res.ok) {
-        const body = await res.text().catch(() => "");
-        console.error("Failed to send Telegram message:", res.status, body);
+        const body = await res.text().catch(() => '');
+        console.error('Failed to send Telegram message:', res.status, body);
       }
     } catch (error) {
-      console.error("Failed to send Telegram message:", error);
+      console.error('Failed to send Telegram message:', error);
     }
   }
 }
