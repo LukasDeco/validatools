@@ -2,6 +2,11 @@
  * Long-polls Telegram getUpdates and forwards main-chat messages containing
  * "delinquent" (case-insensitive) to TELEGRAM_ALERT_CHAT_ID (e.g. agave-watchtower).
  * Run as a separate process alongside the central cron runner (no schedule).
+ *
+ * Two phases: (1) a short startup drain with timeout=0 to ack backlog without
+ * forwarding; (2) steady-state long polling (timeout≈50s) so each HTTP call
+ * blocks until Telegram has updates or the timeout elapses — not a tight loop,
+ * and well within Bot API expectations.
  */
 
 import { TelegramBotMessenger } from '../util/telegram-bot-messenger';
@@ -48,6 +53,10 @@ function extractMessage(update: TgUpdate): TgMessage | undefined {
   );
 }
 
+/**
+ * Telegram holds the connection open for up to `timeoutSec` seconds (long poll).
+ * Use timeout 0 for quick, non-blocking batches (e.g. startup drain only).
+ */
 async function getUpdates(
   botToken: string,
   offset: number,
@@ -102,7 +111,9 @@ async function main() {
     `[telegram-inbound-relay] Listening for "delinquent" in chat ${mainChatId} → alert ${alertChatId} (cooldown ${cooldownMs} ms). Bot privacy must be off in @BotFather for group messages.`
   );
 
-  // Acknowledge backlog without forwarding (avoid replaying old watchtower alerts).
+  // Startup only: drain Telegram's pending update queue with timeout=0 (fast
+  // responses, up to 100 updates per call). Loop exits when the queue is empty
+  // or the last batch is partial — finite work, not the steady-state poll.
   let offset = 0;
   while (true) {
     const batch = await getUpdates(token, offset, 0);
@@ -116,6 +127,8 @@ async function main() {
     `[telegram-inbound-relay] Drained pending updates, starting long poll at offset ${offset}`
   );
 
+  // Steady state: long poll. One request blocks up to ~50s; when idle you get
+  // roughly one round-trip per timeout — not rapid-fire polling, so no API abuse.
   const timeoutSec = 50; // Telegram allows up to 50 for long poll
 
   for (;;) {
@@ -145,6 +158,7 @@ async function main() {
       }
     } catch (e) {
       console.error('[telegram-inbound-relay]', e);
+      // Back off briefly on network/API errors before the next long poll.
       await new Promise((r) => setTimeout(r, 5000));
     }
   }
