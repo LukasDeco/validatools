@@ -47,6 +47,8 @@ Use the centralized runner to enable multiple tools via one `config.yaml`:
 node ts/dist/src/index.js --config ./ts/src/config.yaml
 ```
 
+**Telegram (optional critical second chat)** — With `TELEGRAM_ENABLED`="true", logs go to `TELEGRAM_CHAT_ID` as usual. If you set `TELEGRAM_ALERT_CHAT_ID` to a separate group or supergroup and add the **same** bot to that chat, any log line that contains `delinquent` (case-insensitive) or `CRITICAL` is **also** sent there, prefixed with `🚨`. Use `TELEGRAM_ALERT_COOLDOWN_MS` to throttle those duplicates (default `600000`, i.e. 10 minutes); the main chat is not throttled.
+
 General config layout (each tool can be enabled and scheduled):
 
 ```yaml
@@ -107,6 +109,7 @@ Environment variables:
 - `MAINNET_RPC_URL` or `RPC_URL` (optional; defaults to mainnet public RPC)
 - `TELEGRAM_ENABLED`="true" to send alerts
 - `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` when Telegram is enabled
+- `TELEGRAM_ALERT_CHAT_ID` and `TELEGRAM_ALERT_COOLDOWN_MS` (optional; see central runner Telegram note above)
 
 ### SFDP compliance checker
 
@@ -138,6 +141,7 @@ Environment variables:
 
 - `MAINNET_RPC_URL` and `TESTNET_RPC_URL` (optional)
 - `TELEGRAM_ENABLED`="true", plus `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` for alerts
+- `TELEGRAM_ALERT_CHAT_ID` and `TELEGRAM_ALERT_COOLDOWN_MS` (optional; see central runner Telegram note above)
 
 ### Slot latency benchmark (standalone)
 
