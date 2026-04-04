@@ -18,17 +18,24 @@ export class TelegramBotMessenger {
   }
 
   /** Same bot token; different destination (e.g. critical alerts group). */
-  async sendMessageToChat(chatId: string, message: string): Promise<void> {
+  async sendMessageToChat(
+    chatId: string,
+    message: string,
+    parseModeHtml = true
+  ): Promise<void> {
     try {
       const url = `${this.apiUrl}/sendMessage`;
+      const payload: Record<string, unknown> = {
+        chat_id: chatId,
+        text: message,
+      };
+      if (parseModeHtml) {
+        payload.parse_mode = 'HTML';
+      }
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: message,
-          parse_mode: 'HTML', // Optional: can be "Markdown" or "HTML"
-        }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const body = await res.text().catch(() => '');
