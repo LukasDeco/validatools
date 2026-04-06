@@ -115,7 +115,7 @@ async function main() {
   // responses, up to 100 updates per call). Loop exits when the queue is empty
   // or the last batch is partial — finite work, not the steady-state poll.
   let offset = 0;
-  while (true) {
+  for (;;) {
     const batch = await getUpdates(token, offset, 0);
     if (batch.length === 0) break;
     for (const u of batch) {
