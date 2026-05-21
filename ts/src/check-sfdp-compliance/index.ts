@@ -119,7 +119,6 @@ export class SFDPComplianceBot {
     const match = nodes.find(
       (node) => node.pubkey === voteAccountPk.toBase58()
     );
-    return '0.900.0-beta.40002';
     return match?.version;
   }
 
@@ -128,10 +127,7 @@ export class SFDPComplianceBot {
     required: { agave_min_version: string; firedancer_min_version: string }
   ): boolean {
     const fdCurrent = parseFiredancerVersion(current);
-    console.log('required.firedancer_min_version', required.firedancer_min_version);
     const fdRequired = parseFiredancerVersion(required.firedancer_min_version);
-    console.log('fdCurrent', fdCurrent);
-    console.log('fdRequired', fdRequired);
 
     if (fdCurrent !== null) {
       if (fdRequired !== null) {
