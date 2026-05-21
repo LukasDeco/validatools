@@ -14,15 +14,15 @@ interface VersionRequirement {
 /**
  * Parse Firedancer version strings from RPC into a comparable 4-tuple.
  * Supports legacy `0.902.40002` (patch is 5 digits) and semver-style
- * `0.902.0-beta.40002` (prerelease carries the 5-digit build).
+ * `0.902.0-beta.40002` / `0.909.0-rc.40001` (prerelease carries the 5-digit build).
  */
 function parseFiredancerVersion(
   v: string
 ): [number, number, number, number] | null {
   const s = v.trim();
-  const beta = /^(\d+)\.(\d+)\.(\d+)-beta\.(\d{5})$/.exec(s);
-  if (beta) {
-    return [+beta[1], +beta[2], +beta[3], +beta[4]];
+  const prerelease = /^(\d+)\.(\d+)\.(\d+)-[0-9A-Za-z-]+\.(\d{5})$/.exec(s);
+  if (prerelease) {
+    return [+prerelease[1], +prerelease[2], +prerelease[3], +prerelease[4]];
   }
   const legacy = /^(\d+)\.(\d+)\.(\d{5})$/.exec(s);
   if (legacy) {
@@ -33,6 +33,13 @@ function parseFiredancerVersion(
 
 function isFiredancerVersionString(v: string): boolean {
   return parseFiredancerVersion(v) !== null;
+}
+
+function getTelegramAlertChatId(): string | undefined {
+  return (
+    process.env.TELEGRAM_ALERT_CHAT_ID?.trim() ||
+    process.env.TELEGRAM_CHAT_ID?.trim()
+  );
 }
 
 function compareFiredancerTuples(
@@ -75,7 +82,7 @@ export class SFDPComplianceBot {
   logger = new Logger({
     telegramEnabled: process.env.TELEGRAM_ENABLED === 'true',
     botToken: process.env.TELEGRAM_BOT_TOKEN,
-    chatId: process.env.TELEGRAM_CHAT_ID,
+    chatId: getTelegramAlertChatId(),
     prefix: '[ValidatorVersionCheck] ',
   });
 
@@ -112,6 +119,7 @@ export class SFDPComplianceBot {
     const match = nodes.find(
       (node) => node.pubkey === voteAccountPk.toBase58()
     );
+    return '0.900.0-beta.40002';
     return match?.version;
   }
 
@@ -120,7 +128,10 @@ export class SFDPComplianceBot {
     required: { agave_min_version: string; firedancer_min_version: string }
   ): boolean {
     const fdCurrent = parseFiredancerVersion(current);
+    console.log('required.firedancer_min_version', required.firedancer_min_version);
     const fdRequired = parseFiredancerVersion(required.firedancer_min_version);
+    console.log('fdCurrent', fdCurrent);
+    console.log('fdRequired', fdRequired);
 
     if (fdCurrent !== null) {
       if (fdRequired !== null) {

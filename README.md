@@ -47,7 +47,7 @@ Use the centralized runner to enable multiple tools via one `config.yaml`:
 node ts/dist/src/index.js --config ./ts/src/config.yaml
 ```
 
-**Telegram** — With `TELEGRAM_ENABLED`="true", cron tools send logs only to `TELEGRAM_CHAT_ID`. To mirror **inbound** messages (e.g. agave-watchtower posting “delinquent” into the main group) to a **critical** group, run the separate **telegram-inbound-relay** process (see below); it is not part of `config.yaml` or the cron runner.
+**Telegram** — With `TELEGRAM_ENABLED`="true", cron tools send logs to Telegram. The SFDP / validator version checker sends to `TELEGRAM_ALERT_CHAT_ID` when set, falling back to `TELEGRAM_CHAT_ID`; other cron tools send to `TELEGRAM_CHAT_ID`. To mirror **inbound** messages (e.g. agave-watchtower posting “delinquent” into the main group) to a **critical** group, run the separate **telegram-inbound-relay** process (see below); it is not part of `config.yaml` or the cron runner.
 
 General config layout (each tool can be enabled and scheduled):
 
@@ -167,7 +167,7 @@ CLI overrides (optional):
 Environment variables:
 
 - `MAINNET_RPC_URL` and `TESTNET_RPC_URL` (optional)
-- `TELEGRAM_ENABLED`="true", plus `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` for alerts
+- `TELEGRAM_ENABLED`="true", plus `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALERT_CHAT_ID` for alerts (`TELEGRAM_CHAT_ID` is used as a fallback)
 
 ### Slot latency benchmark (standalone)
 
